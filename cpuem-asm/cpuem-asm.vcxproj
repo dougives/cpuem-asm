@@ -110,12 +110,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="assemble.c" />
+    <ClCompile Include="lex.c" />
+    <ClCompile Include="parse.c" />
   </ItemGroup>
   <ItemGroup>
     <None Include="test.asm">
       <FileType>Document</FileType>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="lex.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

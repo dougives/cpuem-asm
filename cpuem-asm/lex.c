@@ -5,53 +5,23 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include "lex.h"
 
 #define MAX_WORD_LENGTH 0x100
 #define MAX_LITERAL_LENGTH 0x100
 
-typedef enum
-{
-	TT_UNKNOWN = 0,
-	TT_WHITESPACE = 1,
-	TT_PUNCTUATION = 2,
-	TT_WORD = 3,
-	TT_KEYWORD = 4,
-	TT_INTEGER_LITERAL = 5,
-	TT_REAL_LITERAL = 6,
-} TokenType;
-
-typedef struct
-{
-	TokenType type;
-	char* value;
-} Token;
-
-typedef struct
-{
-	Token* token;
-	struct TokenNode* prev;
-	struct TokenNode* next;
-} TokenNode;
-
-typedef struct
-{
-	size_t count;
-	TokenNode* first;
-	TokenNode* last;
-} TokenList;
-
-void parsing_error(const char* msg)
+static void lexing_error(const char* msg)
 {
 	printf("%s\n", msg);
 	getchar();
 	exit(1);
 }
 
-void add_token_to_list(TokenList* list, Token* token)
+static void add_token_to_list(TokenList* list, Token* token)
 {
 	TokenNode* node = (TokenNode*)malloc(sizeof(TokenNode));
 	if (node == NULL)
-		parsing_error("could not add token to list.");
+		lexing_error("could not add token to list.");
 	node->next = NULL;
 	node->token = token;
 
@@ -69,22 +39,22 @@ void add_token_to_list(TokenList* list, Token* token)
 	return;
 }
 
-Token* create_token(TokenType type, char* value)
+static Token* create_token(TokenType type, char* value)
 {
 	Token* token = (Token*)malloc(sizeof(Token));
 	if (token == NULL)
-		parsing_error("could not create token.");
+		lexing_error("could not create token.");
 	token->type = type;
 	token->value = value;
 	return token;
 }
 
-bool is_decimal_digit(char c)
+static bool is_decimal_digit(char c)
 {
 	return c > 0x2f && c < 0x3a;
 }
 
-bool is_number_literal_part(char c, bool ishex)
+static bool is_number_literal_part(char c, bool ishex)
 {
 	char lower = c | 0x20;
 	return
@@ -95,7 +65,7 @@ bool is_number_literal_part(char c, bool ishex)
 		| (lower == 'e');
 }
 
-bool is_number_literal(TokenList* list, char c, FILE* file)
+static bool is_number_literal(TokenList* list, char c, FILE* file)
 {
 	if (!(is_decimal_digit(c)
 		|| c != '-'
@@ -122,20 +92,20 @@ bool is_number_literal(TokenList* list, char c, FILE* file)
 		if (c == '.')
 		{
 			if (isreal)
-				parsing_error("malformed number literal.");
+				lexing_error("malformed number literal.");
 			isreal = true;
 			if (ishex && isreal)
-				parsing_error("malformed number literal.");
+				lexing_error("malformed number literal.");
 		}
 		buffer[count] = c;
 	}
 	ungetc(c, file);
 	if (count >= MAX_LITERAL_LENGTH)
-		parsing_error("literal was longer than max literal length.");
+		lexing_error("literal was longer than max literal length.");
 	buffer[count++] = '\0';
 	char* value = (char*)malloc(count);
 	if (value == NULL)
-		parsing_error("could not allocate space for literal string value.");
+		lexing_error("could not allocate space for literal string value.");
 	memcpy(value, buffer, count);
 	add_token_to_list(
 		list,
@@ -145,29 +115,29 @@ bool is_number_literal(TokenList* list, char c, FILE* file)
 	return true;
 }
 
-bool is_literal(TokenList* list, char c, FILE* file)
+static bool is_literal(TokenList* list, char c, FILE* file)
 {
 	return
 		  is_number_literal(list, c, file);
 }
 
-bool is_letter(char c)
+static bool is_letter(char c)
 {
 	c |= 0x20;
 	return c > 0x60 && c < 0x7b;
 }
 
-bool is_keyword(const char* word, size_t size)
+static bool is_keyword(const char* word, size_t size)
 {
 	return strncmp(word, "halt", size) == 0;
 }
 
-bool is_wordpart(char c)
+static bool is_wordpart(char c)
 {
 	return is_letter(c) || is_decimal_digit(c);
 }
 
-bool is_word(TokenList* list, char c, FILE* file)
+static bool is_word(TokenList* list, char c, FILE* file)
 {
 	if (!(is_letter(c)
 		//| is_decimal_digit(c)
@@ -188,11 +158,11 @@ bool is_word(TokenList* list, char c, FILE* file)
 	}
 	ungetc(c, file);
 	if (count >= MAX_WORD_LENGTH)
-		parsing_error("word was longer than max word length.");
+		lexing_error("word was longer than max word length.");
 	buffer[count++] = '\0';
 	char* value = (char*)malloc(count);
 	if (value == NULL)
-		parsing_error("could not allocate space for word string value.");
+		lexing_error("could not allocate space for word string value.");
 	memcpy(value, buffer, count);
 	add_token_to_list(
 		list,
@@ -202,7 +172,7 @@ bool is_word(TokenList* list, char c, FILE* file)
 	return true;
 }
 
-bool is_punctuation(TokenList* list, char c)
+static bool is_punctuation(TokenList* list, char c)
 {
 	if (!((c == '.')
 		| (c == ':')
@@ -223,7 +193,7 @@ bool is_punctuation(TokenList* list, char c)
 	return true;
 }
 
-bool is_whitespace(char c)
+static bool is_whitespace(char c)
 {
 	return
 		  (c == ' '	)
@@ -259,7 +229,7 @@ TokenList* lex(const char* filename)
 			continue;
 		if (is_literal(list, c, file))
 			continue;
-		parsing_error("unknown token.");
+		lexing_error("unknown token.");
 	}
 
 	return list;
