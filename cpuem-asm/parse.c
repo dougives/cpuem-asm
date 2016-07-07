@@ -457,7 +457,7 @@ Symbol parse_keyword(TokenNode* node, ParserState state)
 	return symbol;
 }
 
-Symbol* parse_function_block(TokenNode* node, ParserState state)
+Symbol* parse_function_block(TokenNode* node, ParserState state, size_t* count)
 {
 	if (node == NULL)
 		out_of_tokens_error();
@@ -467,7 +467,7 @@ Symbol* parse_function_block(TokenNode* node, ParserState state)
 		parsing_error("expected '{' at beginning of function block.");
 
 	Symbol* symbols = NULL;
-	size_t count = 0;
+	*count = 0;
 	while (true)
 	{
 		node = node->next;
@@ -478,15 +478,15 @@ Symbol* parse_function_block(TokenNode* node, ParserState state)
 			&& *node->token->value == '}')
 			return symbols;
 
-		symbols = realloc(symbols, sizeof(Symbol) * (++count));
+		symbols = realloc(symbols, sizeof(Symbol) * (++*count));
 
 		switch (node->token->type)
 		{
 		case TT_KEYWORD:
-			symbols[count - 1] = parse_keyword(node, state);
+			symbols[*count - 1] = parse_keyword(node, state);
 			continue;
 		case TT_WORD:
-			symbols[count - 1] = parse_word(node, state);
+			symbols[*count - 1] = parse_word(node, state);
 			continue;
 			/*
 		case TT_INTEGER_LITERAL:
@@ -502,7 +502,7 @@ Symbol* parse_function_block(TokenNode* node, ParserState state)
 	}
 }
 
-void parse_function(TokenNode* node, FILE* outfile, ParserState state)
+Function* parse_function(TokenNode* node, ParserState state)
 {
 	if (node == NULL)
 		parsing_error("unexpected end of token list.");
@@ -514,7 +514,11 @@ void parse_function(TokenNode* node, FILE* outfile, ParserState state)
 	if (func == NULL)
 		parsing_error("could not allocate memory for function.");
 	func->identifier = token->value;
-	func->block = parse_function_block(node->next);
+	func->block = parse_function_block(node->next, state, &func->count);
+	func->isloaded = false;
+	memcpy(func->hash.value, HASH_ALLZEROS, sizeof(func->hash.value));
+	
+	return func;
 }
 
 void parse(const char* infilename, const char* outfilename)
@@ -529,6 +533,6 @@ void parse(const char* infilename, const char* outfilename)
 	TokenNode* node = list->first;
 	while (node != NULL)
 	{
-		parse_function(node, outfilename, state);
+		parse_function(node, state);
 	}
 }
