@@ -1,5 +1,8 @@
 #pragma once
 
+#define MAX_WORD_LENGTH 0x100
+#define MAX_LITERAL_LENGTH 0x100
+
 typedef enum
 {
 	TT_UNKNOWN = 0,
@@ -9,6 +12,7 @@ typedef enum
 	TT_KEYWORD = 4,
 	TT_INTEGER_LITERAL = 5,
 	TT_REAL_LITERAL = 6,
+	TT_DATATYPE = 7,
 } TokenType;
 
 typedef struct

@@ -7,8 +7,41 @@
 #include <string.h>
 #include "lex.h"
 
-#define MAX_WORD_LENGTH 0x100
-#define MAX_LITERAL_LENGTH 0x100
+const char* keywords[] = 
+{
+	"halt",
+	/*
+	"byte",
+	"sbyte",
+	"ushort",
+	"short",
+	"uint",
+	"int",
+	"ulong",
+	"long",
+	"ulong",
+	"function",
+	"node",
+	"list",
+	*/
+};
+
+const char* datatypes[] =
+{
+	"byte",
+	"sbyte",
+	"ushort",
+	"short",
+	"uint",
+	"int",
+	"ulong",
+	"long",
+	"single",
+	"double",
+	"function",
+	"node",
+	"list",
+};
 
 static void lexing_error(const char* msg)
 {
@@ -129,7 +162,24 @@ static bool is_letter(char c)
 
 static bool is_keyword(const char* word, size_t size)
 {
-	return strncmp(word, "halt", size) == 0;
+	for (
+		size_t i = 0;
+		i < sizeof(keywords) / sizeof(char*);
+		i++)
+		if (strncmp(word, keywords[i], size) == 0)
+			return true;
+	return false;
+}
+
+static bool is_datatype(const char* word, size_t size)
+{
+	for (
+		size_t i = 0;
+		i < sizeof(datatypes) / sizeof(char*);
+		i++)
+		if (strncmp(word, datatypes[i], size) == 0)
+			return true;
+	return false;
 }
 
 static bool is_wordpart(char c)
@@ -167,7 +217,11 @@ static bool is_word(TokenList* list, char c, FILE* file)
 	add_token_to_list(
 		list,
 		create_token(
-			is_keyword(value, count) ? TT_KEYWORD : TT_WORD, 
+			is_keyword(value, count) 
+				? TT_KEYWORD 
+			: is_datatype(value, count)
+				? TT_DATATYPE
+			: TT_WORD, 
 			value));
 	return true;
 }

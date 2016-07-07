@@ -5,7 +5,8 @@
 #include <string.h>
 #include "lex.h"
 
-#define HASH_ALLONES ((uint8_t[]){ ~0uL, ~0uL, ~0uL, ~0uL, })
+#define HASH_ALLZEROS ((uint8_t[]){  0uL,  0uL,  0uL,  0uL, })
+#define HASH_ALLONES  ((uint8_t[]){ ~0uL, ~0uL, ~0uL, ~0uL, })
 
 typedef enum
 {
@@ -15,8 +16,8 @@ typedef enum
 	DT_SHORT	= 0x5,
 	DT_UINT		= 0x2,
 	DT_INT		= 0x6,
-	DT_LONG		= 0x3,
-	DT_ULONG	= 0x7,
+	DT_ULONG	= 0x3,
+	DT_LONG		= 0x7,
 	DT_HALF		= 0x8,
 	DT_SINGLE	= 0x9,
 	DT_DOUBLE	= 0xa,
@@ -26,6 +27,25 @@ typedef enum
 	DT_LIST		= 0xe,
 	DT_RESERVED	= 0xf,
 } DataType;
+
+const char* typemap[] =
+{
+	"byte",
+	"ushort",
+	"uint",
+	"ulong",
+	"sbyte",
+	"short",
+	"int",
+	"long",
+	"half",
+	"single",
+	"double",
+	"quad",
+	"function",
+	"node",
+	"list",
+};
 
 typedef struct
 {
@@ -40,6 +60,8 @@ typedef struct
 		int32_t		i;
 		uint64_t	uL;
 		int64_t		L;
+		float		reals;
+		double		reald;
 		Function*	func;
 		Node*		node;
 		List*		list;
@@ -89,6 +111,7 @@ typedef struct
 
 typedef struct
 {
+	const char* text;
 	bool hasimm;
 	DataType type;
 	OpMap* opmap;
@@ -99,6 +122,8 @@ typedef struct
 typedef struct
 {
 	bool gt, lt, z, eq;
+	const char* label;
+	bool resolved;
 	int offset;
 } BranchSymbol;
 
@@ -123,6 +148,11 @@ typedef struct
 	size_t count;
 } Function;
 
+typedef struct
+{
+	DataType settype;
+} ParserState;
+
 static void parsing_error(const char* msg)
 {
 	printf("%s\n", msg);
@@ -135,13 +165,267 @@ static void out_of_tokens_error()
 	parsing_error("unexpected end of token list.");
 }
 
-Symbol parse_word(TokenNode* node)
+Symbol parse_operation(TokenNode* node, ParserState state)
 {
 	Symbol symbol;
-	
+
+	OperationSymbol* operation = 
+		(OperationSymbol*)malloc(sizeof(OperationSymbol));
+
+	char* typetext = NULL;
+	if (node->token->type == TT_DATATYPE)
+	{
+		typetext = node->token->value;
+		int mapindex;
+		for (
+			mapindex = 0;
+			mapindex < sizeof(typemap) / sizeof(char*);
+			mapindex++)
+			if (
+				strncmp(
+					node->token->value,
+					typemap[mapindex],
+					MAX_WORD_LENGTH)
+				== 0)
+				break;
+
+		state.settype = (DataType)mapindex;
+
+		node = node->next;
+		if (node == NULL)
+			out_of_tokens_error();
+	}
+
+	operation->type = state.settype;
+	operation->hasimm = false;
+	operation->opmap = NULL;
+	operation->selection = NULL;
+	memset(&operation->imm, 0, sizeof(Data));
+
+	char* endptr = NULL;
+	char* littext = NULL;
+	if (node->token->type == TT_INTEGER_LITERAL
+		|| node->token->type == TT_REAL_LITERAL)
+	{
+		littext = node->token->value;
+		operation->hasimm = true;
+		Data data;
+		data.type = state.settype;
+		switch (node->token->type)
+		{
+		case TT_REAL_LITERAL:
+			switch (state.settype)
+			{
+			case DT_SINGLE:
+				data.reals = strtof(node->token->value, &endptr);
+				break;
+			case DT_DOUBLE:
+				data.reald = strtod(node->token->value, &endptr);
+				break;
+			default:
+				parsing_error("expected real datatype to be set.");
+			}
+			break;
+		case TT_INTEGER_LITERAL:
+			data.L = strtoll(node->token->value, &endptr, 0);
+			break;
+		}
+		operation->imm = data;
+
+		node = node->next;
+		if (node == NULL)
+			out_of_tokens_error();
+	}
+
+	operation->text =
+		(node->token->type == TT_WORD)
+		? node->token->value
+		: "nop";
+
+	symbol.type = ST_OPERATION;
+	symbol.operation = operation;
+	size_t symtextlength = 0;
+	size_t typetextlength = 0;
+	size_t littextlength = 0;
+	size_t optextlength = 0;
+	symtextlength +=
+		(typetext != NULL)
+		? typetextlength = strnlen(typetext, MAX_WORD_LENGTH) + 1
+		: 0;
+	symtextlength +=
+		(littext != NULL)
+		? littextlength = strnlen(littext, MAX_LITERAL_LENGTH) + 1
+		: 0;
+	symtextlength +=
+		(optextlength =
+			strnlen(
+				operation->text,
+				MAX_WORD_LENGTH)
+			+ 1);
+	char* symtext = (char*)malloc(symtextlength);
+	memcpy(
+		symtext, 
+		typetext, 
+		typetextlength - 1);
+	symtext[typetextlength] = ' ';
+	memcpy(
+		symtext + typetextlength, 
+		littext, 
+		littextlength - 1);
+	symtext[littextlength + typetextlength] = ' ';
+	memcpy(
+		symtext + littextlength + typetextlength, 
+		operation->text, 
+		optextlength - 1);
+	symtext[symtextlength - 1] = '\0';
+	symbol.text = (const char*)symtext;
+	return symbol;
 }
 
-Symbol parse_keyword(TokenNode* node)
+Symbol parse_fncall(TokenNode* node)
+{
+	Symbol symbol;
+
+	// create halt function call symbol
+	FnCallSymbol* fncall =
+		(FnCallSymbol*)malloc(sizeof(FnCallSymbol));
+	Function* func =
+		(Function*)malloc(sizeof(Function));
+	if (fncall == NULL
+		|| func == NULL)
+		parsing_error("could not allocate function for fncall symbol.");
+	func->identifier = node->token->value;
+	memcpy(func->hash.value, HASH_ALLZEROS, sizeof(func->hash.value));
+	func->isloaded = false;
+	func->block = NULL;
+	func->count = 0;
+	fncall->func = func;
+	fncall->args = NULL;
+
+	node = node->next;
+	if (node == NULL)
+		out_of_tokens_error();
+	if (!(node->token->type == TT_PUNCTUATION
+		&& node->token->value == '('))
+		goto malformed_fncall;
+
+	node = node->next;
+	if (node == NULL)
+		out_of_tokens_error();
+
+	if (node->token->type != TT_INTEGER_LITERAL)
+		goto malformed_fncall;
+	char* endptr = NULL;
+	fncall->count = strtoul(node->token->value, &endptr, 0);
+	if (endptr == NULL)
+		goto malformed_fncall;
+
+	node = node->next;
+	if (node == NULL)
+		out_of_tokens_error();
+	if (!(node->token->type == TT_PUNCTUATION
+		&& node->token->value == ')'))
+		goto malformed_fncall;
+
+	symbol.type = ST_FNCALL;
+	symbol.fncall = fncall;
+	return symbol;
+
+malformed_fncall:
+	parsing_error("malformed fncall.");
+	return symbol;
+}
+
+Symbol parse_branch(TokenNode* node)
+{
+	char* branchtext = node->token->value;
+	size_t textlength = strnlen(branchtext, 6);
+
+	Symbol symbol;
+
+	if (strncmp(branchtext, "br", 2) != 0)
+		goto malformed_branch;
+
+	BranchSymbol* branch = 
+		(BranchSymbol*)malloc(sizeof(BranchSymbol));
+	if (branch == NULL)
+		parsing_error("could not allocate memory for branch symbol.");
+	size_t position = 2;
+	branch->lt = (strncmp(branchtext + position, "lt", 2) == 0);
+	branch->gt = (strncmp(branchtext + position, "gt", 2) == 0);
+	if (branch->lt || branch->gt)
+		position += 2;
+	if (strncmp(branchtext + position, "neq", 3) == 0)
+	{
+		if (branch->lt && branch->gt)
+			goto malformed_branch;
+		branch->lt = branch->gt = true;
+		position += 3;
+	}
+	branch->eq = (strncmp(branchtext + position, "eq", 2) == 0);
+	if (branch->eq 
+		&& branch->lt 
+		&& branch->gt)
+		goto malformed_branch;
+	branch->z = (branchtext[position] == 'z');
+	
+	node = node->next;
+	if (node == NULL)
+		out_of_tokens_error();
+	if (!(node->token->type == TT_PUNCTUATION
+		&& node->token->value == '.'))
+		goto malformed_branch;
+
+	node = node->next;
+	if (node == NULL)
+		out_of_tokens_error();
+
+	if (node->token->type != TT_WORD)
+		goto malformed_branch;
+
+	branch->resolved = false;
+	branch->label = node->token->value;
+	
+	size_t labellength = strnlen(branch->label, MAX_WORD_LENGTH);
+	char* symtext =
+		(char*)malloc(
+			textlength
+			+ labellength
+			+ 2);
+	memcpy(symtext, branchtext, textlength);
+	symtext[textlength] = '.';
+	memcpy(symtext + textlength + 1, branch->label, labellength);
+	symtext[textlength + labellength + 1] = '\0';
+	symbol.text = (const char*)symtext;
+	symbol.type = ST_BRANCH;
+	symbol.branch = branch;
+
+	return symbol;
+
+malformed_branch:
+	parsing_error("malformed branch.");
+	return symbol;
+}
+
+Symbol parse_word(TokenNode* node, ParserState state)
+{
+	TokenNode* next = (TokenNode*)node->next;
+	if (next == NULL)
+		out_of_tokens_error();
+	if (next->token->type == TT_PUNCTUATION)
+	{
+		if (*next->token->value == '.')
+			return parse_branch(node);
+		if (*next->token->value == '(')
+			return parse_fncall(node);
+		parsing_error("unexpected punctuation after word");
+	}
+
+	// must be an operation ...
+	return parse_operation(node, state);
+}
+
+Symbol parse_keyword(TokenNode* node, ParserState state)
 {
 	Symbol symbol;
 	symbol.text = node->token->value;
@@ -173,7 +457,7 @@ Symbol parse_keyword(TokenNode* node)
 	return symbol;
 }
 
-Symbol* parse_function_block(TokenNode* node)
+Symbol* parse_function_block(TokenNode* node, ParserState state)
 {
 	if (node == NULL)
 		out_of_tokens_error();
@@ -199,24 +483,26 @@ Symbol* parse_function_block(TokenNode* node)
 		switch (node->token->type)
 		{
 		case TT_KEYWORD:
-			symbols[count - 1] = parse_keyword(node);
+			symbols[count - 1] = parse_keyword(node, state);
 			continue;
 		case TT_WORD:
-			symbols[count - 1] = parse_word(node);
+			symbols[count - 1] = parse_word(node, state);
 			continue;
+			/*
 		case TT_INTEGER_LITERAL:
 			symbols[count - 1] = parse_integer_literal(node);
 			continue;
 		case TT_REAL_LITERAL:
 			symbols[count - 1] = parse_real_literal(node);
 			continue;
+			*/
 		default:
 			parsing_error("unexpected token in function block.");
 		}
 	}
 }
 
-void parse_function(TokenNode* node, FILE* outfile)
+void parse_function(TokenNode* node, FILE* outfile, ParserState state)
 {
 	if (node == NULL)
 		parsing_error("unexpected end of token list.");
@@ -233,6 +519,9 @@ void parse_function(TokenNode* node, FILE* outfile)
 
 void parse(const char* infilename, const char* outfilename)
 {
+	ParserState state;
+	state.settype = DT_INT;
+
 	FILE* outfile = fopen(outfilename, "r+");
 	TokenList* list = lex(infilename);
 	if (list == NULL)
@@ -240,6 +529,6 @@ void parse(const char* infilename, const char* outfilename)
 	TokenNode* node = list->first;
 	while (node != NULL)
 	{
-		//parse_function(tokennode);
+		parse_function(node, outfilename, state);
 	}
 }
