@@ -170,7 +170,7 @@ static void out_of_tokens_error()
 	parsing_error("unexpected end of token list.");
 }
 
-Symbol parse_operation(TokenNode* node, ParserState state)
+Symbol parse_operation(TokenNode** node, ParserState* state)
 {
 	Symbol symbol;
 
@@ -178,9 +178,9 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 		(OperationSymbol*)malloc(sizeof(OperationSymbol));
 
 	char* typetext = NULL;
-	if (node->token->type == TT_DATATYPE)
+	if ((*node)->token->type == TT_DATATYPE)
 	{
-		typetext = node->token->value;
+		typetext = (*node)->token->value;
 		int mapindex;
 		for (
 			mapindex = 0;
@@ -188,20 +188,20 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 			mapindex++)
 			if (
 				strncmp(
-					node->token->value,
+				(*node)->token->value,
 					typemap[mapindex],
 					MAX_WORD_LENGTH)
 				== 0)
 				break;
 
-		state.settype = (DataType)mapindex;
+		(*state).settype = (DataType)mapindex;
 
-		node = (TokenNode*)node->next;
-		if (node == NULL)
+		*node = (TokenNode*)(*node)->next;
+		if ((*node) == NULL)
 			out_of_tokens_error();
 	}
 
-	operation->type = state.settype;
+	operation->type = (*state).settype;
 	operation->hasimm = false;
 	operation->opmap = NULL;
 	operation->selection = INVALID_OPERATION_SELECTION;
@@ -209,42 +209,43 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 
 	char* endptr = NULL;
 	char* littext = NULL;
-	if (node->token->type == TT_INTEGER_LITERAL
-		|| node->token->type == TT_REAL_LITERAL)
+	if ((*node)->token->type == TT_INTEGER_LITERAL
+		|| (*node)->token->type == TT_REAL_LITERAL)
 	{
-		littext = node->token->value;
+		littext = (*node)->token->value;
 		operation->hasimm = true;
 		Data data;
-		data.type = state.settype;
-		switch (node->token->type)
+		data.type = (*state).settype;
+		switch ((*node)->token->type)
 		{
 		case TT_REAL_LITERAL:
-			switch (state.settype)
+			switch ((*state).settype)
 			{
 			case DT_SINGLE:
-				data.reals = strtof(node->token->value, &endptr);
+				data.reals = strtof((*node)->token->value, &endptr);
 				break;
 			case DT_DOUBLE:
-				data.reald = strtod(node->token->value, &endptr);
+				data.reald = strtod((*node)->token->value, &endptr);
 				break;
 			default:
 				parsing_error("expected real datatype to be set.");
 			}
 			break;
 		case TT_INTEGER_LITERAL:
-			data.L = strtoll(node->token->value, &endptr, 0);
+			data.L = strtoll((*node)->token->value, &endptr, 0);
 			break;
 		}
 		operation->imm = data;
 
-		node = (TokenNode*)node->next;
-		if (node == NULL)
+		*node = (TokenNode*)(*node)->next;
+		if ((*node) == NULL)
 			out_of_tokens_error();
 	}
 
 	operation->text =
-		(node->token->type == TT_WORD)
-		? node->token->value
+		((*node)->token->type == TT_WORD
+			&& *((TokenNode*)(*node)->next)->token->value != '.')
+		? (*node)->token->value
 		: "nop";
 
 	symbol.type = ST_OPERATION;
@@ -268,11 +269,13 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 				MAX_WORD_LENGTH)
 			+ 1);
 	char* symtext = (char*)malloc(symtextlength);
-	memcpy(
-		symtext, 
-		typetext, 
-		typetextlength - 1);
+	if (typetextlength != 0)
+		memcpy(
+			symtext, 
+			typetext, 
+			typetextlength - 1);
 	symtext[typetextlength] = ' ';
+	if (littextlength != 0)
 	memcpy(
 		symtext + typetextlength, 
 		littext, 
@@ -287,7 +290,7 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 	return symbol;
 }
 
-Symbol parse_fncall(TokenNode* node)
+Symbol parse_fncall(TokenNode** node)
 {
 	Symbol symbol;
 
@@ -299,7 +302,7 @@ Symbol parse_fncall(TokenNode* node)
 	if (fncall == NULL
 		|| func == NULL)
 		parsing_error("could not allocate function for fncall symbol.");
-	func->identifier = node->token->value;
+	func->identifier = (*node)->token->value;
 	memcpy(func->hash.value, HASH_ALLZEROS, sizeof(func->hash.value));
 	func->isloaded = false;
 	func->block = NULL;
@@ -307,29 +310,29 @@ Symbol parse_fncall(TokenNode* node)
 	fncall->func = func;
 	fncall->args = NULL;
 
-	node = (TokenNode*)node->next;
-	if (node == NULL)
+	*node = (TokenNode*)(*node)->next;
+	if ((*node) == NULL)
 		out_of_tokens_error();
-	if (!(node->token->type == TT_PUNCTUATION
-		&& *node->token->value == '('))
+	if (!((*node)->token->type == TT_PUNCTUATION
+		&& *(*node)->token->value == '('))
 		goto malformed_fncall;
 
-	node = (TokenNode*)node->next;
-	if (node == NULL)
+	*node = (TokenNode*)(*node)->next;
+	if ((*node) == NULL)
 		out_of_tokens_error();
 
-	if (node->token->type != TT_INTEGER_LITERAL)
+	if ((*node)->token->type != TT_INTEGER_LITERAL)
 		goto malformed_fncall;
 	char* endptr = NULL;
-	fncall->count = strtoul(node->token->value, &endptr, 0);
+	fncall->count = strtoul((*node)->token->value, &endptr, 0);
 	if (endptr == NULL)
 		goto malformed_fncall;
 
-	node = (TokenNode*)node->next;
-	if (node == NULL)
+	*node = (TokenNode*)(*node)->next;
+	if ((*node) == NULL)
 		out_of_tokens_error();
-	if (!(node->token->type == TT_PUNCTUATION
-		&& *node->token->value == ')'))
+	if (!((*node)->token->type == TT_PUNCTUATION
+		&& *(*node)->token->value == ')'))
 		goto malformed_fncall;
 
 	symbol.type = ST_FNCALL;
@@ -341,9 +344,9 @@ malformed_fncall:
 	//return symbol;
 }
 
-Symbol parse_branch(TokenNode* node)
+Symbol parse_branch(TokenNode** node)
 {
-	char* branchtext = node->token->value;
+	char* branchtext = (*node)->token->value;
 	size_t textlength = strnlen(branchtext, 6);
 
 	Symbol symbol;
@@ -374,22 +377,22 @@ Symbol parse_branch(TokenNode* node)
 		goto malformed_branch;
 	branch->z = (branchtext[position] == 'z');
 	
-	node = (TokenNode*)node->next;
-	if (node == NULL)
+	*node = (TokenNode*)(*node)->next;
+	if ((*node) == NULL)
 		out_of_tokens_error();
-	if (!(node->token->type == TT_PUNCTUATION
-		&& *node->token->value == '.'))
+	if (!((*node)->token->type == TT_PUNCTUATION
+		&& *(*node)->token->value == '.'))
 		goto malformed_branch;
 
-	node = (TokenNode*)node->next;
-	if (node == NULL)
+	*node = (TokenNode*)(*node)->next;
+	if ((*node) == NULL)
 		out_of_tokens_error();
 
-	if (node->token->type != TT_WORD)
+	if ((*node)->token->type != TT_WORD)
 		goto malformed_branch;
 
 	branch->resolved = false;
-	branch->label = node->token->value;
+	branch->label = (*node)->token->value;
 	
 	size_t labellength = strnlen(branch->label, MAX_WORD_LENGTH);
 	char* symtext =
@@ -412,9 +415,9 @@ malformed_branch:
 	//return symbol;
 }
 
-Symbol parse_word(TokenNode* node, ParserState state)
+Symbol parse_word(TokenNode** node, ParserState* state)
 {
-	TokenNode* next = (TokenNode*)node->next;
+	TokenNode* next = (TokenNode*)(*node)->next;
 	if (next == NULL)
 		out_of_tokens_error();
 	if (next->token->type == TT_PUNCTUATION)
@@ -430,10 +433,10 @@ Symbol parse_word(TokenNode* node, ParserState state)
 	return parse_operation(node, state);
 }
 
-Symbol parse_keyword(TokenNode* node, ParserState state)
+Symbol parse_keyword(TokenNode** node, ParserState* state)
 {
 	Symbol symbol;
-	symbol.text = node->token->value;
+	symbol.text = (*node)->token->value;
 
 	if (strcmp(symbol.text, "halt") == 0)
 	{
@@ -462,35 +465,38 @@ Symbol parse_keyword(TokenNode* node, ParserState state)
 	return symbol;
 }
 
-Symbol* parse_function_block(TokenNode* node, ParserState state, size_t* count)
+Symbol* parse_function_block(TokenNode** node, ParserState* state, size_t* count)
 {
-	if (node == NULL)
+	if (node == NULL || *node == NULL)
 		out_of_tokens_error();
 
-	if (node->token->type != TT_PUNCTUATION
-		|| *node->token->value != '{')
+	if ((*node)->token->type != TT_PUNCTUATION
+		|| *(*node)->token->value != '{')
 		parsing_error("expected '{' at beginning of function block.");
 
 	Symbol* symbols = NULL;
 	*count = 0;
 	while (true)
 	{
-		node = (TokenNode*)node->next;
-		if (node == NULL)
+		*node = (TokenNode*)(*node)->next;
+		if ((*node) == NULL)
 			out_of_tokens_error();
 
-		if (node->token->type == TT_PUNCTUATION
-			&& *node->token->value == '}')
+		if ((*node)->token->type == TT_PUNCTUATION
+			&& *(*node)->token->value == '}')
 			return symbols;
 
 		symbols = realloc(symbols, sizeof(Symbol) * (++*count));
 
-		switch (node->token->type)
+		switch ((*node)->token->type)
 		{
 		case TT_KEYWORD:
 			symbols[*count - 1] = parse_keyword(node, state);
 			continue;
+		case TT_INTEGER_LITERAL:
+		case TT_REAL_LITERAL:
 		case TT_WORD:
+		case TT_DATATYPE:
 			symbols[*count - 1] = parse_word(node, state);
 			continue;
 			/*
@@ -507,12 +513,12 @@ Symbol* parse_function_block(TokenNode* node, ParserState state, size_t* count)
 	}
 }
 
-Function* parse_function(TokenNode* node, ParserState state)
+Function* parse_function(TokenNode** node, ParserState* state)
 {
-	if (node == NULL)
+	if (node == NULL || *node == NULL)
 		parsing_error("unexpected end of token list.");
 
-	Token* token = node->token;
+	Token* token = (*node)->token;
 	if (token->type != TT_WORD)
 		parsing_error("expected function identifier.");
 	Function* func = (Function*)malloc(sizeof(Function));
@@ -521,7 +527,7 @@ Function* parse_function(TokenNode* node, ParserState state)
 	func->identifier = token->value;
 	func->block = 
 		parse_function_block(
-		(TokenNode*)node->next, 
+		(TokenNode**)(&(*node)->next), 
 			state, 
 			&func->count);
 	func->isloaded = false;
@@ -542,7 +548,7 @@ void parse(const char* infilename, const char* outfilename)
 	TokenNode* node = list->first;
 	while (node != NULL)
 	{
-		parse_function(node, state);
+		parse_function(&node, &state);
 	}
 }
 
