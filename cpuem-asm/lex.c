@@ -290,11 +290,7 @@ TokenList* lex(const char* filename)
 }
 
 
-int main(void)
-{
-	TokenList* tokens = lex("test.asm");
-	return 0;
-}
+
 
 
 

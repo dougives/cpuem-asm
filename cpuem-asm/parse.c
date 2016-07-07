@@ -1,3 +1,6 @@
+#define _CRT_SECURE_NO_WARNINGS
+
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -7,6 +10,8 @@
 
 #define HASH_ALLZEROS ((uint8_t[]){  0uL,  0uL,  0uL,  0uL, })
 #define HASH_ALLONES  ((uint8_t[]){ ~0uL, ~0uL, ~0uL, ~0uL, })
+
+#define INVALID_OPERATION_SELECTION 0xff
 
 typedef enum
 {
@@ -62,9 +67,9 @@ typedef struct
 		int64_t		L;
 		float		reals;
 		double		reald;
-		Function*	func;
-		Node*		node;
-		List*		list;
+		struct Function*	func;
+		struct Node*		node;
+		struct List*		list;
 	};
 } Data;
 
@@ -91,13 +96,6 @@ typedef enum
 	ST_OPERATION = 2,
 	ST_FNCALL = 3,
 } SymbolType;
-
-typedef struct
-{
-	Function* func;
-	void* args;
-	size_t count;
-} FnCallSymbol;
 
 typedef struct
 {
@@ -135,18 +133,25 @@ typedef struct
 	{
 		BranchSymbol* branch;
 		OperationSymbol* operation;
-		FnCallSymbol* fncall;
+		struct FnCallSymbol* fncall;
 	};
 } Symbol;
 
 typedef struct
 {
-	Symbol* identifier;
+	const char* identifier;
 	Hash hash;
 	bool isloaded;
 	Symbol* block;
 	size_t count;
 } Function;
+
+typedef struct
+{
+	Function* func;
+	void* args;
+	size_t count;
+} FnCallSymbol;
 
 typedef struct
 {
@@ -191,7 +196,7 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 
 		state.settype = (DataType)mapindex;
 
-		node = node->next;
+		node = (TokenNode*)node->next;
 		if (node == NULL)
 			out_of_tokens_error();
 	}
@@ -199,7 +204,7 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 	operation->type = state.settype;
 	operation->hasimm = false;
 	operation->opmap = NULL;
-	operation->selection = NULL;
+	operation->selection = INVALID_OPERATION_SELECTION;
 	memset(&operation->imm, 0, sizeof(Data));
 
 	char* endptr = NULL;
@@ -232,7 +237,7 @@ Symbol parse_operation(TokenNode* node, ParserState state)
 		}
 		operation->imm = data;
 
-		node = node->next;
+		node = (TokenNode*)node->next;
 		if (node == NULL)
 			out_of_tokens_error();
 	}
@@ -302,14 +307,14 @@ Symbol parse_fncall(TokenNode* node)
 	fncall->func = func;
 	fncall->args = NULL;
 
-	node = node->next;
+	node = (TokenNode*)node->next;
 	if (node == NULL)
 		out_of_tokens_error();
 	if (!(node->token->type == TT_PUNCTUATION
-		&& node->token->value == '('))
+		&& *node->token->value == '('))
 		goto malformed_fncall;
 
-	node = node->next;
+	node = (TokenNode*)node->next;
 	if (node == NULL)
 		out_of_tokens_error();
 
@@ -320,20 +325,20 @@ Symbol parse_fncall(TokenNode* node)
 	if (endptr == NULL)
 		goto malformed_fncall;
 
-	node = node->next;
+	node = (TokenNode*)node->next;
 	if (node == NULL)
 		out_of_tokens_error();
 	if (!(node->token->type == TT_PUNCTUATION
-		&& node->token->value == ')'))
+		&& *node->token->value == ')'))
 		goto malformed_fncall;
 
 	symbol.type = ST_FNCALL;
-	symbol.fncall = fncall;
+	symbol.fncall = (struct FnCallSymbol*)fncall;
 	return symbol;
 
 malformed_fncall:
 	parsing_error("malformed fncall.");
-	return symbol;
+	//return symbol;
 }
 
 Symbol parse_branch(TokenNode* node)
@@ -369,14 +374,14 @@ Symbol parse_branch(TokenNode* node)
 		goto malformed_branch;
 	branch->z = (branchtext[position] == 'z');
 	
-	node = node->next;
+	node = (TokenNode*)node->next;
 	if (node == NULL)
 		out_of_tokens_error();
 	if (!(node->token->type == TT_PUNCTUATION
-		&& node->token->value == '.'))
+		&& *node->token->value == '.'))
 		goto malformed_branch;
 
-	node = node->next;
+	node = (TokenNode*)node->next;
 	if (node == NULL)
 		out_of_tokens_error();
 
@@ -404,7 +409,7 @@ Symbol parse_branch(TokenNode* node)
 
 malformed_branch:
 	parsing_error("malformed branch.");
-	return symbol;
+	//return symbol;
 }
 
 Symbol parse_word(TokenNode* node, ParserState state)
@@ -449,7 +454,7 @@ Symbol parse_keyword(TokenNode* node, ParserState state)
 		fncall->args = NULL;
 		fncall->count = 0;
 		symbol.type = ST_FNCALL;
-		symbol.fncall = fncall;
+		symbol.fncall = (struct FnCallSymbol*)fncall;
 		return symbol;
 	}
 
@@ -470,7 +475,7 @@ Symbol* parse_function_block(TokenNode* node, ParserState state, size_t* count)
 	*count = 0;
 	while (true)
 	{
-		node = node->next;
+		node = (TokenNode*)node->next;
 		if (node == NULL)
 			out_of_tokens_error();
 
@@ -508,13 +513,17 @@ Function* parse_function(TokenNode* node, ParserState state)
 		parsing_error("unexpected end of token list.");
 
 	Token* token = node->token;
-	if (token != TT_WORD)
+	if (token->type != TT_WORD)
 		parsing_error("expected function identifier.");
 	Function* func = (Function*)malloc(sizeof(Function));
 	if (func == NULL)
 		parsing_error("could not allocate memory for function.");
 	func->identifier = token->value;
-	func->block = parse_function_block(node->next, state, &func->count);
+	func->block = 
+		parse_function_block(
+		(TokenNode*)node->next, 
+			state, 
+			&func->count);
 	func->isloaded = false;
 	memcpy(func->hash.value, HASH_ALLZEROS, sizeof(func->hash.value));
 	
@@ -535,4 +544,11 @@ void parse(const char* infilename, const char* outfilename)
 	{
 		parse_function(node, state);
 	}
+}
+
+
+int main(void)
+{
+	parse("test.asm", "test.o");
+	return 0;
 }
