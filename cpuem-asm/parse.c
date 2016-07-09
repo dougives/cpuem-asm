@@ -95,6 +95,7 @@ typedef enum
 	ST_BRANCH = 1,
 	ST_OPERATION = 2,
 	ST_FNCALL = 3,
+	ST_LABEL = 4,
 } SymbolType;
 
 typedef struct
@@ -177,6 +178,8 @@ Symbol parse_operation(TokenNode** node, ParserState* state)
 	OperationSymbol* operation = 
 		(OperationSymbol*)malloc(sizeof(OperationSymbol));
 
+	TokenNode* prev = *node;
+
 	char* typetext = NULL;
 	if ((*node)->token->type == TT_DATATYPE)
 	{
@@ -196,6 +199,7 @@ Symbol parse_operation(TokenNode** node, ParserState* state)
 
 		(*state).settype = (DataType)mapindex;
 
+		//prev = *node;
 		*node = (TokenNode*)(*node)->next;
 		if ((*node) == NULL)
 			out_of_tokens_error();
@@ -237,6 +241,7 @@ Symbol parse_operation(TokenNode** node, ParserState* state)
 		}
 		operation->imm = data;
 
+		prev = *node;
 		*node = (TokenNode*)(*node)->next;
 		if ((*node) == NULL)
 			out_of_tokens_error();
@@ -287,6 +292,7 @@ Symbol parse_operation(TokenNode** node, ParserState* state)
 		optextlength - 1);
 	symtext[symtextlength - 1] = '\0';
 	symbol.text = (const char*)symtext;
+	*node = prev;
 	return symbol;
 }
 
@@ -415,6 +421,15 @@ malformed_branch:
 	//return symbol;
 }
 
+Symbol parse_label(TokenNode** node)
+{
+	Symbol symbol;
+	symbol.type = ST_LABEL;
+	symbol.text = (*node)->token->value;
+	*node = (TokenNode*)(*node)->next;
+	return symbol;
+}
+
 Symbol parse_word(TokenNode** node, ParserState* state)
 {
 	TokenNode* next = (TokenNode*)(*node)->next;
@@ -426,6 +441,8 @@ Symbol parse_word(TokenNode** node, ParserState* state)
 			return parse_branch(node);
 		if (*next->token->value == '(')
 			return parse_fncall(node);
+		if (*next->token->value == ':')
+			return parse_label(node);
 		parsing_error("unexpected punctuation after word");
 	}
 
@@ -471,7 +488,7 @@ Symbol* parse_function_block(TokenNode** node, ParserState* state, size_t* count
 		out_of_tokens_error();
 
 	if ((*node)->token->type != TT_PUNCTUATION
-		|| *(*node)->token->value != '{')
+		&& *(*node)->token->value != '{')
 		parsing_error("expected '{' at beginning of function block.");
 
 	Symbol* symbols = NULL;
@@ -479,12 +496,17 @@ Symbol* parse_function_block(TokenNode** node, ParserState* state, size_t* count
 	while (true)
 	{
 		*node = (TokenNode*)(*node)->next;
+
+	dont_get_next_token:
 		if ((*node) == NULL)
 			out_of_tokens_error();
 
 		if ((*node)->token->type == TT_PUNCTUATION
 			&& *(*node)->token->value == '}')
+		{
+			*node = (TokenNode*)(*node)->next;
 			return symbols;
+		}
 
 		symbols = realloc(symbols, sizeof(Symbol) * (++*count));
 
@@ -525,9 +547,10 @@ Function* parse_function(TokenNode** node, ParserState* state)
 	if (func == NULL)
 		parsing_error("could not allocate memory for function.");
 	func->identifier = token->value;
+	*node = (TokenNode*)(*node)->next;
 	func->block = 
 		parse_function_block(
-		(TokenNode**)(&(*node)->next), 
+			node, 
 			state, 
 			&func->count);
 	func->isloaded = false;
